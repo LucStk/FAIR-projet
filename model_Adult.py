@@ -36,6 +36,7 @@ On binarise :
 
 On n'utilise pas "education" mais sa version en continue avec educational-num
 """
+
 y = torch.Tensor(LabelBinarizer().fit_transform(data.gender)).squeeze()
 
 data_continues = data[['age', 'fnlwgt', 'educational-num',
@@ -45,11 +46,18 @@ data_one_hot = pandas.get_dummies(data[['workclass', 'relationship', 'race', 'na
 data_binary  = LabelBinarizer().fit_transform(data.income)
 x            = np.concatenate((data_continues, data_binary, data_one_hot), axis = 1)
 
-dataset      = torch.utils.data.TensorDataset( torch.Tensor(x), torch.Tensor(y) )
-dataloader   = torch.utils.data.DataLoader(dataset, batch_size = 10, shuffle = True)
+
+
+
 
 INPUT_SIZE  = x.shape[1]
 OUTPUT_SIZE = 1
+BATCH_SIZE  = 10
+
+dataset      = torch.utils.data.TensorDataset( torch.Tensor(x), torch.Tensor(y) )
+dataloader   = torch.utils.data.DataLoader(dataset, batch_size = BATCH_SIZE, shuffle = True)
+
+
 """
     Création du Séléctionneur, 
     on met qu'une seule couche pour l'instant et on sort en sigmoid pour avoir des proba
@@ -75,9 +83,18 @@ Predicteur = nn.Sequential(
 """
 Optimisation
 """
-NB_ITERATION = 100
-for i in range(NB_ITERATION):
+
+opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-3)
+opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-3)
+
+NB_MAX_ITERATION = 100
+cpt = 0
+for i in range(NB_MAX_ITERATION):
     for x, y in dataloader:
+        cpt += 1
+        opti_predicteur.zero_grad()
+        opti_selecteur.zero_grad()
+
         # On selectionne les features
         g = Selecteur(x)
         rand      = torch.rand(x.shape[0], x.shape[1])
@@ -91,13 +108,26 @@ for i in range(NB_ITERATION):
         selection_k[range(x.shape[0]),k] = 1 #Selection avec les sensitives features
 
         #On backward le Selecteur
+        pred    = Predicteur(x*selection).squeeze()
 
-        pred    = Predicteur(x*selection)
-        l_pred  = - (y*torch.log(pred)).sum()
-        l_sent  = - (pred*torch.log(Predicteur(x*selection_k))).sum()
+        with torch.no_grad():
+            l_pred  = - (y*torch.log(pred))
+            l_sent  = - (pred*torch.log(Predicteur(x*selection_k).squeeze()))
 
-        pi = (torch.pow(g, select)*torch.pow(1-g, 1-select)).prod(dim=1).sum()
+        pi = (torch.pow(g, select)*torch.pow(1-g, 1-select)).prod(dim=1)
 
-        l_select = (l_sent.detach() - l_pred.detach())*torch.log(pi)
+        l_select = - ((l_sent - l_pred)*torch.log(pi)).sum()* (BATCH_SIZE/len(data))
         l_select.backward()
+        opti_selecteur.step()
+
+        # On apprend le prédicteur
+
+        pred_k = Predicteur(x*selection_k).squeeze()
+        l_pred = - (y * (pred/ pred.detach()) + pred.detach()* (pred_k/pred_k.detach()) + pred*torch.log(pred_k.detach())).sum()*(BATCH_SIZE/len(data))
+        l_pred.backward()
+        opti_predicteur.step()
+
+        writer.add_scalar('train/Loss_selecteur' , l_select, cpt)
+        writer.add_scalar('train/Loss_predicteur', l_pred  , cpt)
+
     
