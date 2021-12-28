@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import pandas
+import time
 from sklearn.preprocessing import LabelBinarizer
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
@@ -14,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 """
 
 data = pandas.read_csv("adult.csv")
-writer = SummaryWriter("logs")
+writer = SummaryWriter("logs/"+str(time.time()))
 """
 Les paramètres :
 'age', 'workclass', 'fnlwgt', 'education', 'educational-num',
@@ -84,8 +85,10 @@ Predicteur = nn.Sequential(
 Optimisation
 """
 
-opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-3)
-opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-3)
+opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-4)
+opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-4)
+
+lossBCE = torch.nn.BCELoss(reduction = 'none')
 
 NB_MAX_ITERATION = 100
 cpt = 0
@@ -95,39 +98,53 @@ for i in range(NB_MAX_ITERATION):
         opti_predicteur.zero_grad()
         opti_selecteur.zero_grad()
 
-        # On selectionne les features
+        # On selectionne les features avec le selecteur
         g = Selecteur(x)
         rand      = torch.rand(x.shape[0], x.shape[1])
         select = (rand < g).int()
 
         # On calcule les loss
-        k = np.random.choice(range(x.shape[1]), x.shape[0]) #Selection des sensitives features pour chaque batch
-        selection_k    = select.clone()
-        selection      = select.clone()
-        selection[range(x.shape[0]),k]   = 0 #Selection sans les sensitives features
-        selection_k[range(x.shape[0]),k] = 1 #Selection avec les sensitives features
+        k = np.random.choice(range(x.shape[1])) #Selection des sensitives features pour chaque batch
+        select_k    = select.clone()
+        select[range(x.shape[0]),k]   = 0 #Selection sans les sensitives features
+        select_k[range(x.shape[0]),k] = 1 #Selection avec les sensitives features
 
         #On backward le Selecteur
-        pred    = Predicteur(x*selection).squeeze()
-
+        pred    = Predicteur(x*select).squeeze()
+        pred_k  = Predicteur(x*select_k).squeeze()
+        
         with torch.no_grad():
-            l_pred  = - (y*torch.log(pred))
-            l_sent  = - (pred*torch.log(Predicteur(x*selection_k).squeeze()))
+            #l_pred  = - (y*torch.log(pred) + (1-y)*torch.log(1-pred))
+            #l_sent  = - (pred*torch.log(pred_k)+ (1-pred)*torch.log(1-pred_k))
+            l_pred = lossBCE(pred, y)
+            l_sent = lossBCE(pred_k, pred)
 
-        pi = (torch.pow(g, select)*torch.pow(1-g, 1-select)).prod(dim=1)
+        # On enlève l'élément k du calcul de pi
+        pi = (torch.pow(g, select)*torch.pow(1-g, 1-select))
+        pi = torch.cat((pi[range(x.shape[0]),:k], pi[range(x.shape[0]),k+1:]),dim = 1).prod(dim=1)
 
         l_select = - ((l_sent - l_pred)*torch.log(pi)).sum()* (BATCH_SIZE/len(data))
         l_select.backward()
         opti_selecteur.step()
 
         # On apprend le prédicteur
+        eps = 1e-4 #Si pred vaut 0
+        l_1 =  y * (pred/ (pred.detach()+eps)) + (1-y)* ((1-pred)/ ((1-pred.detach()) + eps))
+        l_2 =  pred.detach()*(pred_k/(pred_k.detach()+eps)) + \
+               (1-pred.detach())*((1-pred_k)/((1-pred_k.detach())+eps))
 
-        pred_k = Predicteur(x*selection_k).squeeze()
-        l_pred = - (y * (pred/ pred.detach()) + pred.detach()* (pred_k/pred_k.detach()) + pred*torch.log(pred_k.detach())).sum()*(BATCH_SIZE/len(data))
-        l_pred.backward()
+        l_3 = lossBCE(pred_k.detach(),pred)
+        #pred*torch.log(pred_k.detach()) + (1-pred)*torch.log(1-pred_k.detach())\
+        
+        l_predict = -(l_1 + l_2 + l_3).sum()*(BATCH_SIZE/len(data))
+        
+        if np.isnan(l_predict.item()):
+            raise
+        l_predict.backward()
+
         opti_predicteur.step()
 
         writer.add_scalar('train/Loss_selecteur' , l_select, cpt)
-        writer.add_scalar('train/Loss_predicteur', l_pred  , cpt)
-
+        writer.add_scalar('train/Loss_predicteur', l_predict  , cpt)
+        #
     
