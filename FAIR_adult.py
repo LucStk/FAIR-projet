@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 data = pandas.read_csv("adult.csv")
 writer = SummaryWriter("logs/"+str(time.time()))
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 """
 Les paramètres :
 'age', 'workclass', 'fnlwgt', 'education', 'educational-num',
@@ -33,7 +34,7 @@ On encode one-hot :
     workclass, relationship, race, native-country, occupation, marital-status
 
 On binarise :
-    income et gender
+    income (<= 50k ou >50k) et gender (H ou F)
 
 On n'utilise pas "education" mais sa version en continue avec educational-num
 """
@@ -43,22 +44,23 @@ y = torch.Tensor(LabelBinarizer().fit_transform(data.gender)).squeeze()
 data_continues = data[['age', 'fnlwgt', 'educational-num',
                        'capital-gain', 'capital-loss', 'hours-per-week']].to_numpy()
 
+#Normalisation data_continues
+data_continues = (data_continues - data_continues.mean(0))/data_continues.std(0)
+
 data_one_hot = pandas.get_dummies(data[['workclass', 'relationship', 'race', 'native-country', 'occupation', 'marital-status']]).to_numpy()
 data_binary  = LabelBinarizer().fit_transform(data.income)
 x            = np.concatenate((data_continues, data_binary, data_one_hot), axis = 1)
 
-
-
-
-
 INPUT_SIZE  = x.shape[1]
 OUTPUT_SIZE = 2
-BATCH_SIZE  = 10
+BATCH_SIZE  = 30
 
-dataset      = torch.utils.data.TensorDataset( torch.Tensor(x), torch.Tensor(y) )
-dataloader   = torch.utils.data.DataLoader(dataset, batch_size = BATCH_SIZE, shuffle = True)
+dataset_train    = torch.utils.data.TensorDataset( torch.Tensor(x[10000:]
+), torch.Tensor(y[10000:]))
+dataloader_train = torch.utils.data.DataLoader(dataset_train, batch_size = BATCH_SIZE, shuffle = True)
 
-
+dataset_test    = ( torch.Tensor(x[:10000]
+), torch.Tensor(y[:10000]))
 """
     Création du Séléctionneur, 
     on met qu'une seule couche pour l'instant et on sort en sigmoid pour avoir des proba
@@ -76,62 +78,81 @@ Selecteur = nn.Sequential(
 H1_SIZE = 50
 H2_SIZE = 30
 Predicteur = nn.Sequential(
-    nn.Linear(INPUT_SIZE, H1_SIZE)    , nn.ReLU(),
-    nn.Linear(H1_SIZE   , H2_SIZE)    , nn.ReLU(),
-    nn.Linear(H2_SIZE   , OUTPUT_SIZE), nn.LogSoftmax()
-)
+    nn.Linear(INPUT_SIZE, H1_SIZE), nn.ReLU(),
+    nn.Linear(H1_SIZE, H2_SIZE)   , nn.ReLU(),
+    nn.Linear(H2_SIZE, OUTPUT_SIZE)
+).to(device)
 
 """
 Optimisation
 """
-
+loss = nn.CrossEntropyLoss()
 opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-4)
 opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-4)
+lossCE = nn.CrossEntropyLoss()
 
-NB_MAX_ITERATION = 100
+NB_MAX_ITERATION = 30
 cpt = 0
 for i in range(NB_MAX_ITERATION):
-    for x, y in dataloader:
+    for x, y in dataloader_train:
         cpt += 1
-        opti_predicteur.zero_grad()
+        ############################
+        # Apprentissage sélécteur  #
+        ############################
         opti_selecteur.zero_grad()
 
-        # On selectionne les features avec le selecteur
-        g = Selecteur(x)
-        rand      = torch.rand(x.shape[0], x.shape[1])
+        k = np.random.choice(range(x.shape[1])) #Selection des sensitives features pour chaque batch
+        filtre = torch.ones(x.shape)
+        filtre[range(x.shape[0]),k] = 0
+
+
+
+        g = Selecteur(x)*filtre
+
+        rand   = torch.rand(x.shape[0], x.shape[1])
         select = (rand < g).int()
 
-        # On calcule les loss
-        k = np.random.choice(range(x.shape[1])) #Selection des sensitives features pour chaque batch
-        select_k    = select.clone()
-        select[range(x.shape[0]),k]   = 0 #Selection sans les sensitives features
-        select_k[range(x.shape[0]),k] = 1 #Selection avec les sensitives features
 
-        #On backward le Selecteur
-        pred    = Predicteur(x*select).squeeze()
-        pred_k  = Predicteur(x*select_k).squeeze()
+        select_k = select.clone()
+        select_k[range(x.shape[0]),k] += 1 #Selection avec les sensitives features
+
+        # On backward le Selecteur
+        y_hat   = Predicteur((x*select).to(device)).squeeze()
+        y_hat_k = Predicteur((x*select_k).to(device)).squeeze()
         
-        l_pred  = - pred[y.long()].sum()
-        l_sent  = - (pred.exp()*pred_k).sum()
+        l_pred = lossCE(y_hat, y.long().to(device))
+        l_sent = lossCE(y_hat_k,y_hat)
 
         # On enlève l'élément k du calcul de pi
-        pi = (torch.pow(g, select)*torch.pow(1-g, 1-select))
-        pi = torch.cat((pi[range(x.shape[0]),:k], pi[range(x.shape[0]),k+1:]),dim = 1).prod(dim=1)
+        pi = (torch.pow(g, select)*torch.pow(1-g, 1-select)).to(device)
 
         l_select = - ((l_sent.detach() - l_pred.detach())*torch.log(pi)).sum()* (BATCH_SIZE/len(data))
         l_select.backward()
         opti_selecteur.step()
 
-        # On apprend le prédicteur
-        l_predict = (l_pred + l_sent).sum()*(BATCH_SIZE/len(data))
-        
-        if np.isnan(l_predict.item()):
-            raise
+        ############################
+        # Apprentissage prédicteur #
+        ############################
+        opti_predicteur.zero_grad()
+
+        l_predict = (l_pred + l_sent)*(BATCH_SIZE/len(data))
         l_predict.backward()
 
         opti_predicteur.step()
+        #On calcule le nombre de bon résultats
+        acc = (torch.max(y_hat.cpu(), dim = 1)[1] == y).float().mean()
 
-        writer.add_scalar('train/Loss_selecteur' , l_select, cpt)
-        writer.add_scalar('train/Loss_predicteur', l_predict  , cpt)
-        #
+        writer.add_scalar('train/Loss_selecteur' , l_select.cpu(), cpt)
+        writer.add_scalar('train/Loss_predicteur', l_predict.cpu()  , cpt)
+        writer.add_scalar('train/Accuracy', acc  , cpt)
+
+    x, y = dataset_test
+    with torch.no_grad():
+        y_hat = Predicteur(x.to(device))
+        l_predict = loss(y_hat,y.long().to(device))*(BATCH_SIZE/len(data))
+        acc = (torch.max(y_hat.cpu(), dim = 1)[1] == y).float().mean()
+    
+    writer.add_scalar('test/Loss_predicteur', l_predict.cpu(), i)
+    writer.add_scalar('test/Accuracy', acc, i)
+
     
