@@ -121,7 +121,7 @@ for i in range(NB_MAX_ITERATION):
         y_hat_k = Predicteur((x*select_k).to(device)).squeeze()
         
         l_pred = lossCE(y_hat, y.long().to(device))
-        l_sent = lossCE(y_hat_k,y_hat)
+        l_sent = - (F.softmax(y_hat)*F.log_softmax(y_hat_k)).sum()
 
         # On enlève l'élément k du calcul de pi
         pi = (torch.pow(g, select)*torch.pow(1-g, 1-select)).to(device)
