@@ -34,7 +34,7 @@ On encode one-hot :
     workclass, relationship, race, native-country, occupation, marital-status
 
 On binarise :
-    income et gender
+    income (<= 50k ou >50k) et gender (H ou F)
 
 On n'utilise pas "education" mais sa version en continue avec educational-num
 """
@@ -43,6 +43,9 @@ y = torch.Tensor(LabelBinarizer().fit_transform(data.gender)).squeeze()
 
 data_continues = data[['age', 'fnlwgt', 'educational-num',
                        'capital-gain', 'capital-loss', 'hours-per-week']].to_numpy()
+
+#Normalisation data_continues
+data_continues = (data_continues - data_continues.mean(0))/data_continues.std(0)
 
 data_one_hot = pandas.get_dummies(data[['workclass', 'relationship', 'race', 'native-country', 'occupation', 'marital-status']]).to_numpy()
 data_binary  = LabelBinarizer().fit_transform(data.income)
@@ -62,8 +65,8 @@ dataset_test    = ( torch.Tensor(x[:10000]
 """
     Création du Prédicteur
 """
-H1_SIZE = 30
-H2_SIZE = 20
+H1_SIZE = 50
+H2_SIZE = 30
 Predicteur = nn.Sequential(
     nn.Linear(INPUT_SIZE, H1_SIZE), nn.ReLU(),
     nn.Linear(H1_SIZE, H2_SIZE)   , nn.ReLU(),
@@ -73,9 +76,9 @@ Predicteur = nn.Sequential(
 """
 Optimisation
 """
-opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-5)
+opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-4)
 loss = nn.CrossEntropyLoss()
-NB_MAX_ITERATION = 100
+NB_MAX_ITERATION = 30
 cpt = 0
 for i in range(NB_MAX_ITERATION):
     for x, y in dataloader_train:
