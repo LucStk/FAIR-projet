@@ -52,7 +52,7 @@ x            = np.concatenate((data_continues, data_binary, data_one_hot), axis 
 
 
 INPUT_SIZE  = x.shape[1]
-OUTPUT_SIZE = 1
+OUTPUT_SIZE = 2
 BATCH_SIZE  = 10
 
 dataset      = torch.utils.data.TensorDataset( torch.Tensor(x), torch.Tensor(y) )
@@ -78,7 +78,7 @@ H2_SIZE = 30
 Predicteur = nn.Sequential(
     nn.Linear(INPUT_SIZE, H1_SIZE)    , nn.ReLU(),
     nn.Linear(H1_SIZE   , H2_SIZE)    , nn.ReLU(),
-    nn.Linear(H2_SIZE   , OUTPUT_SIZE), nn.Sigmoid()
+    nn.Linear(H2_SIZE   , OUTPUT_SIZE), nn.LogSoftmax()
 )
 
 """
@@ -87,8 +87,6 @@ Optimisation
 
 opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-4)
 opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-4)
-
-lossBCE = torch.nn.BCELoss(reduction = 'none')
 
 NB_MAX_ITERATION = 100
 cpt = 0
@@ -113,30 +111,19 @@ for i in range(NB_MAX_ITERATION):
         pred    = Predicteur(x*select).squeeze()
         pred_k  = Predicteur(x*select_k).squeeze()
         
-        with torch.no_grad():
-            #l_pred  = - (y*torch.log(pred) + (1-y)*torch.log(1-pred))
-            #l_sent  = - (pred*torch.log(pred_k)+ (1-pred)*torch.log(1-pred_k))
-            l_pred = lossBCE(pred, y)
-            l_sent = lossBCE(pred_k, pred)
+        l_pred  = - pred[y.long()].sum()
+        l_sent  = - (pred.exp()*pred_k).sum()
 
         # On enlève l'élément k du calcul de pi
         pi = (torch.pow(g, select)*torch.pow(1-g, 1-select))
         pi = torch.cat((pi[range(x.shape[0]),:k], pi[range(x.shape[0]),k+1:]),dim = 1).prod(dim=1)
 
-        l_select = - ((l_sent - l_pred)*torch.log(pi)).sum()* (BATCH_SIZE/len(data))
+        l_select = - ((l_sent.detach() - l_pred.detach())*torch.log(pi)).sum()* (BATCH_SIZE/len(data))
         l_select.backward()
         opti_selecteur.step()
 
         # On apprend le prédicteur
-        eps = 1e-4 #Si pred vaut 0
-        l_1 =  y * (pred/ (pred.detach()+eps)) + (1-y)* ((1-pred)/ ((1-pred.detach()) + eps))
-        l_2 =  pred.detach()*(pred_k/(pred_k.detach()+eps)) + \
-               (1-pred.detach())*((1-pred_k)/((1-pred_k.detach())+eps))
-
-        l_3 = lossBCE(pred_k.detach(),pred)
-        #pred*torch.log(pred_k.detach()) + (1-pred)*torch.log(1-pred_k.detach())\
-        
-        l_predict = -(l_1 + l_2 + l_3).sum()*(BATCH_SIZE/len(data))
+        l_predict = (l_pred + l_sent).sum()*(BATCH_SIZE/len(data))
         
         if np.isnan(l_predict.item()):
             raise
