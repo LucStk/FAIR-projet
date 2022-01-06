@@ -41,7 +41,7 @@ On binarise :
 On n'utilise pas "education" mais sa version en continue avec educational-num
 """
 
-y = torch.Tensor(LabelBinarizer().fit_transform(data.income)).squeeze()
+y = torch.Tensor(LabelBinarizer().fit_transform(data.gender)).squeeze()
 
 data_continues = data[['age', 'fnlwgt', 'educational-num',
                        'capital-gain', 'capital-loss', 'hours-per-week']].to_numpy()
@@ -50,7 +50,7 @@ data_continues = data[['age', 'fnlwgt', 'educational-num',
 data_continues = (data_continues - data_continues.mean(0))/data_continues.std(0)
 
 data_one_hot = pandas.get_dummies(data[['workclass', 'relationship', 'race', 'native-country', 'occupation', 'marital-status']]).to_numpy()
-data_binary  = LabelBinarizer().fit_transform(data.gender)
+data_binary  = LabelBinarizer().fit_transform(data.income)
 x            = np.concatenate((data_continues, data_binary, data_one_hot), axis = 1)
 
 INPUT_SIZE  = x.shape[1]
@@ -89,8 +89,6 @@ Predicteur = nn.Sequential(
 Optimisation
 """
 loss = nn.CrossEntropyLoss()
-BCE = nn.BCELoss()
-
 opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-4)
 opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-4)
 
@@ -103,19 +101,11 @@ for i in range(NB_MAX_ITERATION):
         ############################
         # Apprentissage sélécteur  #
         ############################
-        k = np.random.choice(range(x.shape[1]), (x.shape[0],1)) #Selection des sensitives features pour chaque batch
+        k = np.random.choice(range(x.shape[1]), (x.shape[0],4)) #Selection des sensitives features pour chaque batch
         
-        filtre = torch.ones(x.shape)
-        filtre[range(x.shape[0]),k.T] = 0
+        select_k = torch.ones(x.shape)
+        select_k[range(x.shape[0]),k.T] = 0
 
-        g = Selecteur(x)
-        g_ = g*filtre
-
-        rand   = torch.rand(x.shape[0], x.shape[1]) # Sélection
-        select = (rand < g_).int()
-
-        select_k = select.clone()
-        select_k[range(x.shape[0]),k.T] += 1 #Add avec les sensitives features
 
         # On backward le Selecteur
         y_hat   = Predicteur((x*select_k).to(device)).squeeze()
@@ -123,16 +113,6 @@ for i in range(NB_MAX_ITERATION):
         
         l_pred = loss(y_hat, y.long().to(device))
         l_sent = - (F.softmax(y_hat)*F.log_softmax(y_hat_k)).sum()
-
-        ############################
-        # Apprentissage Sélécteur  #
-        ############################
-        opti_selecteur.zero_grad()
-        #pi = (torch.pow(g_, select)*torch.pow(1-g_, 1-select)).to(device)
-
-        l_select = -((l_sent - l_pred).detach()*BCE(g, select)).sum()* (BATCH_SIZE/len(data))
-        l_select.backward()
-        opti_selecteur.step()
 
         ############################
         # Apprentissage prédicteur #
@@ -145,10 +125,8 @@ for i in range(NB_MAX_ITERATION):
         opti_predicteur.step()
         #On calcule le nombre de bon résultats
         acc = (torch.max(y_hat.cpu(), dim = 1)[1] == y).float().mean()
-        writer.add_scalar('train/percent_selection' , float(select.sum() / sum(select.shape)), cpt)
-        writer.add_scalar('train/mean_selection' , g.mean().cpu(), cpt)
-        writer.add_scalar('train/std_selection'  , g.std().cpu(), cpt)
-        writer.add_scalar('train/Loss_selecteur' , l_select.cpu(), cpt)
+
+        #writer.add_scalar('train/Loss_selecteur' , l_select.cpu(), cpt)
         writer.add_scalar('train/Loss_predicteur', l_predict.cpu()  , cpt)
         writer.add_scalar('train/Accuracy', acc  , cpt)
 

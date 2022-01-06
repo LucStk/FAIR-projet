@@ -39,7 +39,7 @@ On binarise :
 On n'utilise pas "education" mais sa version en continue avec educational-num
 """
 
-y = torch.Tensor(LabelBinarizer().fit_transform(data.gender)).squeeze()
+y = torch.Tensor(LabelBinarizer().fit_transform(data.income)).squeeze()
 
 data_continues = data[['age', 'fnlwgt', 'educational-num',
                        'capital-gain', 'capital-loss', 'hours-per-week']].to_numpy()
@@ -48,7 +48,7 @@ data_continues = data[['age', 'fnlwgt', 'educational-num',
 data_continues = (data_continues - data_continues.mean(0))/data_continues.std(0)
 
 data_one_hot = pandas.get_dummies(data[['workclass', 'relationship', 'race', 'native-country', 'occupation', 'marital-status']]).to_numpy()
-data_binary  = LabelBinarizer().fit_transform(data.income)
+data_binary  = LabelBinarizer().fit_transform(data.gender)
 x            = np.concatenate((data_continues, data_binary, data_one_hot), axis = 1)
 
 INPUT_SIZE  = x.shape[1]
