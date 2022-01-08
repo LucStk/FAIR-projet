@@ -41,7 +41,7 @@ On binarise :
 On n'utilise pas "education" mais sa version en continue avec educational-num
 """
 
-y = torch.Tensor(LabelBinarizer().fit_transform(data.gender)).squeeze()
+y = torch.Tensor(LabelBinarizer().fit_transform(data.income)).squeeze()
 
 data_continues = data[['age', 'fnlwgt', 'educational-num',
                        'capital-gain', 'capital-loss', 'hours-per-week']].to_numpy()
@@ -50,8 +50,8 @@ data_continues = data[['age', 'fnlwgt', 'educational-num',
 data_continues = (data_continues - data_continues.mean(0))/data_continues.std(0)
 
 data_one_hot = pandas.get_dummies(data[['workclass', 'relationship', 'race', 'native-country', 'occupation', 'marital-status']]).to_numpy()
-data_binary  = LabelBinarizer().fit_transform(data.income)
-x            = np.concatenate((data_continues, data_binary, data_one_hot), axis = 1)
+data_binary  = LabelBinarizer().fit_transform(data.gender)
+x            = np.concatenate((data_continues, data_one_hot, data_binary), axis = 1)
 
 INPUT_SIZE  = x.shape[1]
 OUTPUT_SIZE = 2
@@ -88,28 +88,30 @@ Predicteur = nn.Sequential(
 """
 Optimisation
 """
-loss = nn.CrossEntropyLoss()
+loss = nn.CrossEntropyLoss(reduction = 'sum')
 opti_selecteur  = torch.optim.Adam(Selecteur.parameters(), 1e-4)
 opti_predicteur = torch.optim.Adam(Predicteur.parameters(), 1e-4)
 
 
 NB_MAX_ITERATION = 30
 cpt = 0
+k = 90
+
 for i in range(NB_MAX_ITERATION):
     for x, y in dataloader_train:
         cpt += 1
         ############################
         # Apprentissage sélécteur  #
         ############################
-        k = np.random.choice(range(x.shape[1]), (x.shape[0],4)) #Selection des sensitives features pour chaque batch
-        
-        select_k = torch.ones(x.shape)
-        select_k[range(x.shape[0]),k.T] = 0
+        select = torch.ones(x.shape)
+        select[:,k] = 0
 
+        select_k = select.clone()
+        select_k[:,k] += 1
 
         # On backward le Selecteur
-        y_hat   = Predicteur((x*select_k).to(device)).squeeze()
-        y_hat_k = Predicteur((x).to(device)).squeeze()
+        y_hat   = Predicteur((x*select).to(device)).squeeze()
+        y_hat_k = Predicteur((x*select_k).to(device)).squeeze()
         
         l_pred = loss(y_hat, y.long().to(device))
         l_sent = - (F.softmax(y_hat)*F.log_softmax(y_hat_k)).sum()
@@ -119,7 +121,7 @@ for i in range(NB_MAX_ITERATION):
         ############################
         opti_predicteur.zero_grad()
 
-        l_predict = (l_pred -l_sent)*(BATCH_SIZE/len(data))
+        l_predict = (l_pred + l_sent)*(BATCH_SIZE/len(data))
         l_predict.backward()
 
         opti_predicteur.step()
@@ -127,7 +129,9 @@ for i in range(NB_MAX_ITERATION):
         acc = (torch.max(y_hat.cpu(), dim = 1)[1] == y).float().mean()
 
         #writer.add_scalar('train/Loss_selecteur' , l_select.cpu(), cpt)
-        writer.add_scalar('train/Loss_predicteur', l_predict.cpu()  , cpt)
+        writer.add_scalar('train_predict/Global_loss', l_predict.cpu()  , cpt)
+        writer.add_scalar('train_predict/Loss_pred', l_pred.cpu()  , cpt)
+        writer.add_scalar('train_predict/Loss_sent', l_sent.cpu()  , cpt)
         writer.add_scalar('train/Accuracy', acc  , cpt)
 
     x, y = dataset_test

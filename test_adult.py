@@ -95,7 +95,7 @@ for i in range(NB_MAX_ITERATION):
         acc = (torch.max(y_hat.cpu(), dim = 1)[1] == y).float().mean()
 
         #writer.add_scalar('train/Loss_selecteur' , l_select, cpt)
-        writer.add_scalar('train/Loss_predicteur', l_predict.cpu()  , cpt)
+        writer.add_scalar('train_predict/Global_loss', l_predict.cpu()  , cpt)
         writer.add_scalar('train/Accuracy', acc  , cpt)
 
     x, y = dataset_test
