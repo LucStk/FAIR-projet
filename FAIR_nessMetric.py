@@ -1,21 +1,44 @@
 import torch
 import torch.nn as nn
 
-def AbsEqOppDiff(x,y,y_hat,k):
-    a = x[:,k]
-    indexY1 = y.int() == 1
-    indexA1Y1 = (a * indexY1).bool()
-    Pa1 = torch.sum(y_hat[indexA1Y1].int() == 1) / torch.sum(indexA1Y1)
-    indexA0Y1 = ((1-a) * indexY1).bool()
-    Pa0 = torch.sum(y_hat[indexA0Y1].int() == 1) / torch.sum(indexA0Y1)
-    return torch.abs(Pa0 - Pa1)
+"""
+testX = torch.ones((5,5))
+testX[4,0] = 0
+testX[3,0] = 0
+testY = torch.ones(5)
+testYh = torch.ones(5)
+testYh[4] = 0
+testYh[2] = 0
+testK = 0
+print("Truth : " + str(testY))
+print("Predi : " + str(testYh))
+print("Prote : " + str(testX[:,testK]))"""
 
-def AbsAvgOddsDiff(x,y,y_hat,k):
-    return 0.5 * (AbsEqOppDiff(x,y,y_hat,k) + AbsEqOppDiff(x,1-y,y_hat,k))
+def AbsEqOppDiff(a,y,y_hat):
+    # |TPRdiff|
+    TP = (y.int() == 1) * (y_hat.int() == 1)
+    FN = (y.int() == 1) * (y_hat.int() == 0) 
+    TPp = (TP * a).sum()
+    FNp = (FN * a).sum()
+    TPu = (TP * (1-a)).sum()
+    FNu = (FN * (1-a)).sum()
+    TPRp = TPp / (TPp + FNp)
+    TPRu = TPu / (TPu + FNu)
+    return torch.abs(TPRp - TPRu)
 
-def DisparateImpact(x,y):
-    #A revoir, ça depend pas du modele pour le moment...
-    a = x[:,k].bool()
-    num = torch.sum(y[~a].int() == 1) / torch.sum(y[~a])
-    denom = torch.sum(y[a].int() == 1) / torch.sum(y[a])
-    return num/denom
+def AbsAvgOddsDiff(a,y,y_hat):
+    # (|TPRdiff| + |FPRdiff|) / 2
+    return (AbsEqOppDiff(a,y,y_hat) + AbsEqOppDiff(a,1-y,y_hat)) / 2
+
+def DisparateImpact(a,y,y_hat):
+    indexYh = y_hat == 1
+    num = ((1-a) * indexYh).sum() / (1-a).sum()
+    denom = (a * indexYh).sum() / a.sum()
+    return 1 - num/denom
+
+"""
+print("###TESTING")
+print(AbsEqOppDiff(testX[:,testK],testY,testYh))
+print(AbsAvgOddsDiff(testX[:,testK],testY,testYh))
+print(DisparateImpact(testX[:,testK],testY,testYh))
+raise E"""
