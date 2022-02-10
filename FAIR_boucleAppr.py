@@ -19,12 +19,10 @@ device = 'cpu'
 #Recuperation des donnees
 dataloader_train, dataset_test, k, INPUT_SIZE, lenData = load_Adult()
 #Definition du modele
-if(model == "BASELINE"):
+if(model == "Fair"):
     model = Baseline(device, INPUT_SIZE, writer)
 else:
     model = FairModele(device, INPUT_SIZE, writer)
-
-
 
 cpt = 0
 for i in range(EPOCH):
@@ -35,12 +33,8 @@ for i in range(EPOCH):
         x = x.to(device)
         y = y.long().to(device)
         #Entrainement du model
-        y_hat = model.predict(x, k)
+        model.predict(x, k)
         model.train(y, BATCH_SIZE/lenData)
-        #Logs
-        if(SHOULDLOG):
-            acc = (torch.argmax(y_hat.cpu(), dim = 1) == y.int().cpu()).float().mean()
-            writer.add_scalar('train/Accuracy', acc  , cpt)
 
     #Test
     x, y = dataset_test

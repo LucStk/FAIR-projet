@@ -107,6 +107,8 @@ class FairModele(Baseline):
 
     def predict(self, data, k):
         #Selection des features
+        self.k = k
+        self.data = data
         self.probaSelect  = self.Selecteur(data)
         self.select_k = (torch.rand(data.shape) < self.probaSelect).int() #Sélection des features
         self.select_nok = self.select_k.clone()
@@ -131,7 +133,21 @@ class FairModele(Baseline):
         l_predict = (l_pred + l_sens) * normalizer
         l_predict.backward()
         self.opti_predicteur.step()
-        return l_select, l_predict
+        
+        with torch.no_grad() :
+            l_predict = self.loss(self.y_hat_nok,y.long().to(self.device))
+            prediction = torch.argmax(self.y_hat_nok.cpu(), dim = 1)
+            acc = (prediction == y.int()).float().mean()
+
+            if self.writer is not None:
+                self.writer.add_scalar('train/Loss_predicteur', l_predict.cpu(), self.epoch)
+                self.writer.add_scalar('train/Accuracy', acc, self.epoch)
+                self.writer.add_scalar('train/AbsEqOppDiff', AbsEqOppDiff(self.data[:,self.k],y,prediction), self.epoch)
+                self.writer.add_scalar('train/AbsAvgOddsDiff', AbsAvgOddsDiff(self.data[:,self.k],y,prediction), self.epoch)
+                self.writer.add_scalar('train/1-DispImpact', DisparateImpact(self.data[:,self.k],y,prediction), self.epoch)
+                self.writer.flush()
+
+
 
 
 class FairModele_GAN(object):
