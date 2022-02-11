@@ -3,8 +3,8 @@ import torch.nn as nn
 from FAIR_nessMetric import *
 
 H1_Selecteur_SIZE = 100
-H1_Predicteur_SIZE = 50
-H2_Predicteur_SIZE = 30
+H1_Predicteur_SIZE = 200
+H2_Predicteur_SIZE = 100
 LR_SELECTEUR = 1e-4
 LR_PREDICTEUR = 1e-3
 LR_DISCRIMINATEUR = 1e-3
@@ -141,8 +141,8 @@ class FairModele(Baseline):
             acc = (prediction == y.int()).float().mean()
 
             if self.writer is not None:
-                self.writer.add_scalar('train/Loss_predicteur', l_predict.cpu(), self.epoch)
-                self.writer.add_scalar('train/Accuracy', acc, self.epoch)
+                self.writer.add_scalar('train/Loss_predicteur', l_predict.cpu(), self.cpt)
+                self.writer.add_scalar('train/Accuracy', acc, self.cpt)
 
                 absEqOppDiff    = AbsEqOppDiff(self.data[:,self.k],y,prediction)
                 absAvgOddsDiff  = AbsAvgOddsDiff(self.data[:,self.k],y,prediction)
@@ -204,7 +204,7 @@ class FairModele_GAN(object):
     def predict(self, data, k):
         #Selection des features
         self.probaSelect  = self.Selecteur(data)
-
+        self.data = data
         self.y_sensitive = data[:,k] #Pour l'apprentissage du discriminateur
 
         self.select_k = (torch.rand(data.shape) < self.probaSelect).int() #Sélection des features
@@ -229,7 +229,7 @@ class FairModele_GAN(object):
 
         #Optimisation Discriminateur
         self.opti_discriminateur.zero_grad()
-        l_discrim = self.BCE(self.Discriminateur(self.y_hat_nok), self.y_sensitive)
+        l_discrim = self.BCE(self.Discriminateur(self.data*self.select_nok).squeeze(), self.y_sensitive)
         l_discrim.backward()
         self.opti_discriminateur.step()
 
@@ -240,9 +240,9 @@ class FairModele_GAN(object):
         self.opti_predicteur.step()
 
         if self.writer is not None:
-            self.writer.add_scalar('train_predict/Loss_pred', l_pred.cpu()  , self.cpt)
-            self.writer.add_scalar('train_predict/Loss_sent', l_sens.cpu()  , self.cpt)
-            self.writer.add_scalar("train_predict/Loss_disc", l_discrim.cpu(), self.cpt)
+            self.writer.add_scalar('train/Loss_pred', l_pred.cpu()  , self.cpt)
+            self.writer.add_scalar('train/Loss_sent', l_sens.cpu()  , self.cpt)
+            self.writer.add_scalar("train/Loss_disc", l_discrim.cpu(), self.cpt)
             self.writer.flush()
 
     def test(self, x, y, k):
@@ -252,8 +252,8 @@ class FairModele_GAN(object):
         prediction = torch.argmax(y_hat.cpu(), dim = 1)
         acc = (prediction == y.int()).float().mean()
 
-        y_hat_sensitive = self.Discriminateur(self.y_hat_nok)
-        acc_sensitive = (torch.argmax(y_hat_sensitive.cpu(), dim = 1) == self.y_sensitive.int().cpu()).float().mean()
+        y_hat_sensitive = self.Discriminateur(x*self.select_nok).squeeze()
+        acc_sensitive = ((y_hat_sensitive.cpu() >= 0.5) == self.y_sensitive.int().cpu()).float().mean()
   
 
         if self.writer is not None:

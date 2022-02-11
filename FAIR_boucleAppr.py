@@ -7,7 +7,7 @@ import time
 SEED = 10
 SHOULDLOG = True
 EPOCH = 300
-model = "Fair"
+model = "FAIR_"
 
 #Initialisation
 torch.manual_seed(SEED)
@@ -21,8 +21,10 @@ dataloader_train, dataset_test, k, INPUT_SIZE, lenData = load_Adult()
 #Definition du modele
 if(model == "BASELINE"):
     model = Baseline(device, INPUT_SIZE, writer)
-else:
+elif (model == "FAIR"):
     model = FairModele(device, INPUT_SIZE, writer)
+else:
+    model = FairModele_GAN(device, INPUT_SIZE, writer)
 
 cpt = 0
 for i in range(EPOCH):
