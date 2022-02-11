@@ -136,12 +136,11 @@ class FairModele(Baseline):
         self.opti_predicteur.step()
         
         with torch.no_grad() :
-            l_predict = self.loss(self.y_hat_nok,y.long().to(self.device))
             prediction = torch.argmax(self.y_hat_nok.cpu(), dim = 1)
             acc = (prediction == y.int()).float().mean()
 
             if self.writer is not None:
-                self.writer.add_scalar('train/Loss_predicteur', l_predict.cpu(), self.cpt)
+                self.writer.add_scalar('train/Loss_predicteur', l_pred.cpu(), self.cpt)
                 self.writer.add_scalar('train/Accuracy', acc, self.cpt)
 
                 absEqOppDiff    = AbsEqOppDiff(self.data[:,self.k],y,prediction)
@@ -229,9 +228,13 @@ class FairModele_GAN(object):
 
         #Optimisation Discriminateur
         self.opti_discriminateur.zero_grad()
-        l_discrim = self.BCE(self.Discriminateur(self.data*self.select_nok).squeeze(), self.y_sensitive)
+        y_hat_sensitive = self.Discriminateur(self.data*self.select_nok).squeeze()
+        l_discrim = self.BCE(y_hat_sensitive, self.y_sensitive)
+        acc_sensitive = ((y_hat_sensitive.cpu() >= 0.5) == self.y_sensitive.int().cpu()).float().mean()
+  
         l_discrim.backward()
         self.opti_discriminateur.step()
+
 
         #Optimisation Predicteur
         self.opti_predicteur.zero_grad()
@@ -240,9 +243,14 @@ class FairModele_GAN(object):
         self.opti_predicteur.step()
 
         if self.writer is not None:
+            prediction = torch.argmax(self.y_hat_nok.cpu(), dim = 1)
+            acc = (prediction == y.int()).float().mean()
+
             self.writer.add_scalar('train/Loss_pred', l_pred.cpu()  , self.cpt)
             self.writer.add_scalar('train/Loss_sent', l_sens.cpu()  , self.cpt)
             self.writer.add_scalar("train/Loss_disc", l_discrim.cpu(), self.cpt)
+            self.writer.add_scalar("train/accuracy_sensitive", acc_sensitive, self.cpt)
+            self.writer.add_scalar('train/Accuracy', acc, self.cpt)
             self.writer.flush()
 
     def test(self, x, y, k):
