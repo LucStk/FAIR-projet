@@ -103,7 +103,7 @@ class FairModele(Baseline):
         self.BCE = nn.BCELoss(reduction = "sum").to(self.device)
         self.opti_selecteur = torch.optim.Adam(self.Selecteur.parameters(), LR_SELECTEUR)
         self.opti_predicteur = torch.optim.Adam(self.Predicteur.parameters(), LR_PREDICTEUR)
-        
+        self.cpt = 0
 
     def predict(self, data, k):
         #Selection des features
@@ -121,6 +121,7 @@ class FairModele(Baseline):
 
     def train(self, y, normalizer):
         #Loss
+        self.cpt += 1
         l_pred = self.loss(self.y_hat_nok, y)
         l_sens = - (softmax(self.y_hat_nok)*log_softmax(self.y_hat_k)).sum()
         #Optimisation Selecteur
@@ -142,9 +143,17 @@ class FairModele(Baseline):
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss_predicteur', l_predict.cpu(), self.epoch)
                 self.writer.add_scalar('train/Accuracy', acc, self.epoch)
-                self.writer.add_scalar('train/AbsEqOppDiff', AbsEqOppDiff(self.data[:,self.k],y,prediction), self.epoch)
-                self.writer.add_scalar('train/AbsAvgOddsDiff', AbsAvgOddsDiff(self.data[:,self.k],y,prediction), self.epoch)
-                self.writer.add_scalar('train/1-DispImpact', DisparateImpact(self.data[:,self.k],y,prediction), self.epoch)
+
+                absEqOppDiff    = AbsEqOppDiff(self.data[:,self.k],y,prediction)
+                absAvgOddsDiff  = AbsAvgOddsDiff(self.data[:,self.k],y,prediction)
+                disparateImpact = DisparateImpact(self.data[:,self.k],y,prediction)
+
+                if torch.isnan(absEqOppDiff) or torch.isnan(absAvgOddsDiff) or torch.isnan(disparateImpact):
+                    raise
+
+                self.writer.add_scalar('train/AbsEqOppDiff', absEqOppDiff, self.cpt)
+                self.writer.add_scalar('train/AbsAvgOddsDiff', absAvgOddsDiff, self.cpt)
+                self.writer.add_scalar('train/1-DispImpact',disparateImpact , self.cpt)
                 self.writer.flush()
 
 

@@ -7,7 +7,7 @@ import time
 SEED = 10
 SHOULDLOG = True
 EPOCH = 300
-model = "BASELINE"
+model = "Fair"
 
 #Initialisation
 torch.manual_seed(SEED)
@@ -19,7 +19,7 @@ device = 'cpu'
 #Recuperation des donnees
 dataloader_train, dataset_test, k, INPUT_SIZE, lenData = load_Adult()
 #Definition du modele
-if(model == "Fair"):
+if(model == "BASELINE"):
     model = Baseline(device, INPUT_SIZE, writer)
 else:
     model = FairModele(device, INPUT_SIZE, writer)
