@@ -4,10 +4,10 @@ from FAIR_dataLoader import *
 from FAIR_nessMetric import *
 import time
 
-SEED = 10
+SEED = 15
 SHOULDLOG = True
-EPOCH = 10
-model = "RANDOM"
+EPOCH = 50
+model = "sfdg"
 
 #Initialisation
 torch.manual_seed(SEED)
@@ -47,4 +47,5 @@ for i in range(EPOCH):
     with torch.no_grad():
         model.test(x, y, k)
 
-    
+#le Y : 0.237 % de 1
+#Le protected : 0.668 de 1)

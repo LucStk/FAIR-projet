@@ -40,7 +40,6 @@ class Random(object):
         y_hat[:,1] = 1 - prediction
         l_predict = self.loss(y_hat,y.long().to(self.device))
         acc = (prediction == y.int()).float().mean()
-
         if self.writer is not None:
             self.writer.add_scalar('test/Loss_predicteur', l_predict.cpu(), self.epoch)
             self.writer.add_scalar('test/Accuracy', acc, self.epoch)
@@ -58,12 +57,18 @@ class Baseline(object):
         self.writer = writer
         self.device = device
         self.epoch = 0
+        self.cpt = 0
         #Predicteur
         self.Predicteur = nn.Sequential(
             nn.Linear(INPUT_SIZE, H1_Predicteur_SIZE), nn.ReLU(),
             nn.Linear(H1_Predicteur_SIZE, H2_Predicteur_SIZE), nn.ReLU(),
             nn.Linear(H2_Predicteur_SIZE, OUTPUT_SIZE)
         ).to(self.device)
+        self.Discriminateur = nn.Sequential(
+            nn.Linear(INPUT_SIZE, H1_Predicteur_SIZE), nn.ReLU(),
+            nn.Linear(H1_Predicteur_SIZE, H2_Predicteur_SIZE), nn.ReLU(),
+            nn.Linear(H2_Predicteur_SIZE, 1), nn.Sigmoid()
+        )
         """self.Predicteur = nn.Sequential(
             nn.Linear(INPUT_SIZE, 200), nn.ReLU(),
             nn.Linear(200, 200), nn.ReLU(),
@@ -74,21 +79,56 @@ class Baseline(object):
         ).to(self.device)"""
         #Optimisation
         self.loss = nn.CrossEntropyLoss(reduction = 'sum')
+        self.BCE = nn.BCELoss(reduction = "sum").to(self.device)
         self.opti_predicteur = torch.optim.Adam(self.Predicteur.parameters(), LR_PREDICTEUR)
-        
+        self.opti_discriminateur = torch.optim.Adam(self.Discriminateur.parameters(), LR_DISCRIMINATEUR)
+
 
     def predict(self, data, k):
         #Prediction
+        self.data = data
+        self.y_sensitive = data[:,k] #Pour l'apprentissage du discriminateur
         self.y_hat = self.Predicteur(data).squeeze() #without sensitive feature
         return self.y_hat
 
     def train(self, y, normalizer):
+        self.cpt += 1
         #Loss
         l_pred = self.loss(self.y_hat, y) * normalizer
         #Optimisation Predicteur
         self.opti_predicteur.zero_grad() 
         l_pred.backward()
         self.opti_predicteur.step()
+
+        #Optimisation Discriminateur
+        self.opti_discriminateur.zero_grad()
+        y_hat_sensitive = self.Discriminateur(self.data).squeeze()
+        l_discrim = self.BCE(y_hat_sensitive, self.y_sensitive)
+        acc_sensitive = ((y_hat_sensitive.cpu() >= 0.5) == self.y_sensitive.int().cpu()).float().mean()
+        l_discrim.backward()
+        self.opti_discriminateur.step()
+
+        with torch.no_grad() :
+            prediction = torch.argmax(self.y_hat.cpu(), dim = 1)
+            acc = (prediction == y.int()).float().mean()
+
+            if self.writer is not None:
+                self.writer.add_scalar('train/Loss_predicteur', l_pred.cpu(), self.cpt)
+                self.writer.add_scalar("train/accuracy_sensitive", acc_sensitive, self.cpt)
+                self.writer.add_scalar('train/Accuracy', acc, self.cpt)
+                """
+                absEqOppDiff    = AbsEqOppDiff(self.data[:,self.k],y,prediction)
+                absAvgOddsDiff  = AbsAvgOddsDiff(self.data[:,self.k],y,prediction)
+                disparateImpact = DisparateImpact(self.data[:,self.k],y,prediction)
+
+                if torch.isnan(absEqOppDiff) or torch.isnan(absAvgOddsDiff) or torch.isnan(disparateImpact):
+                    raise
+
+                self.writer.add_scalar('train/AbsEqOppDiff', absEqOppDiff, self.cpt)
+                self.writer.add_scalar('train/AbsAvgOddsDiff', absAvgOddsDiff, self.cpt)
+                self.writer.add_scalar('train/1-DispImpact',disparateImpact , self.cpt)
+                """
+                self.writer.flush()
 
     def test(self, x, y, k):
         self.epoch += 1
@@ -97,12 +137,16 @@ class Baseline(object):
         prediction = torch.argmax(y_hat.cpu(), dim = 1)
         acc = (prediction == y.int()).float().mean()
 
+        y_hat_sensitive = self.Discriminateur(x).squeeze()
+        acc_sensitive = ((y_hat_sensitive.cpu() >= 0.5) == self.y_sensitive.int().cpu()).float().mean()
+  
         if self.writer is not None:
             self.writer.add_scalar('test/Loss_predicteur', l_predict.cpu(), self.epoch)
             self.writer.add_scalar('test/Accuracy', acc, self.epoch)
             self.writer.add_scalar('test/AbsEqOppDiff', AbsEqOppDiff(x[:,k],y,prediction), self.epoch)
             self.writer.add_scalar('test/AbsAvgOddsDiff', AbsAvgOddsDiff(x[:,k],y,prediction), self.epoch)
             self.writer.add_scalar('test/1-DispImpact', DisparateImpact(x[:,k],y,prediction), self.epoch)
+            self.writer.add_scalar('test/Accuracy_sensitive', acc_sensitive, self.epoch)
             self.writer.flush()
         print("Epoch "+ str(self.epoch)+ " - AccTest : " + str(acc))
 
@@ -180,7 +224,7 @@ class FairModele(Baseline):
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss_predicteur', l_pred.cpu(), self.cpt)
                 self.writer.add_scalar('train/Accuracy', acc, self.cpt)
-
+                """
                 absEqOppDiff    = AbsEqOppDiff(self.data[:,self.k],y,prediction)
                 absAvgOddsDiff  = AbsAvgOddsDiff(self.data[:,self.k],y,prediction)
                 disparateImpact = DisparateImpact(self.data[:,self.k],y,prediction)
@@ -191,6 +235,7 @@ class FairModele(Baseline):
                 self.writer.add_scalar('train/AbsEqOppDiff', absEqOppDiff, self.cpt)
                 self.writer.add_scalar('train/AbsAvgOddsDiff', absAvgOddsDiff, self.cpt)
                 self.writer.add_scalar('train/1-DispImpact',disparateImpact , self.cpt)
+                """
                 self.writer.flush()
 
 
@@ -212,8 +257,8 @@ class FairModele_GAN(object):
 
         #Predicteur
         self.Predicteur = nn.Sequential(
-            nn.Linear(INPUT_SIZE, H1_Predicteur_SIZE), nn.ReLU(),
-            nn.Linear(H1_Predicteur_SIZE, H2_Predicteur_SIZE), nn.ReLU(),
+            nn.Linear(INPUT_SIZE, H1_Predicteur_SIZE), nn.SELU(),
+            nn.Linear(H1_Predicteur_SIZE, H2_Predicteur_SIZE), nn.SELU(),
             nn.Linear(H2_Predicteur_SIZE, OUTPUT_SIZE)
         ).to(self.device)
 
@@ -284,9 +329,9 @@ class FairModele_GAN(object):
             prediction = torch.argmax(self.y_hat_nok.cpu(), dim = 1)
             acc = (prediction == y.int()).float().mean()
 
-            self.writer.add_scalar('train/Loss_pred', l_pred.cpu()  , self.cpt)
-            self.writer.add_scalar('train/Loss_sent', l_sens.cpu()  , self.cpt)
-            self.writer.add_scalar("train/Loss_disc", l_discrim.cpu(), self.cpt)
+            self.writer.add_scalar('train/Loss_predicteur', l_pred.cpu()  , self.cpt)
+            #self.writer.add_scalar('train/Loss_sent', l_sens.cpu()  , self.cpt)
+            #self.writer.add_scalar("train/Loss_disc", l_discrim.cpu(), self.cpt)
             self.writer.add_scalar("train/accuracy_sensitive", acc_sensitive, self.cpt)
             self.writer.add_scalar('train/Accuracy', acc, self.cpt)
             self.writer.flush()

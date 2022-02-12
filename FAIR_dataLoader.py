@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from sklearn.preprocessing import LabelBinarizer
 
-BATCH_SIZE  = 20
+BATCH_SIZE  = 100
 
 def load_Adult():
 	data = pandas.read_csv("adult.csv")
